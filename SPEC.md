@@ -1,6 +1,6 @@
 # Chatathon protocol definition
 
-- Transfer encoding is 7-bit ASCII text (support UTF-8 if you want)
+- Transfer encoding is 7-bit ASCII text. Messages MUST NOT contain any bytes with the most significant bit set.
 - Each message between client and server is delimited by a \n character (0x0a)
 - Each message starts with a "message type" in all caps, then additional arguments separated by spaces
 - Messages the server may send to the client:
