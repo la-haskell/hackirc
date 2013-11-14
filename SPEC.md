@@ -4,7 +4,7 @@
 - Each message between client and server is delimited by a \n character (0x0a)
 - Each message starts with a "message type" in all caps, then additional arguments separated by spaces
 - Messages the server may send to the client:
-  - `OK` `<message>`. When a client's message has been handled successfully, the server MUST respond with an `OK` message, and MAY include a message to further describe the success.
+  - `OK` `<message>`. When a client's message has been handled successfully, the server MUST respond with an `OK` message, and MAY include a message to further describe the success. These optional messages SHOULD NOT be shown to the user.
   - `ERROR` `<reason>`, MUST be sent whenever a client's request cannot be fulfilled or understood, and SHOULD include a string describing the cause of the problem.
   - `MESSAGE` `<room>` `<sender>` `<content>`. When a client is in a chat room and someone else in that room sends a chat message to it, the server MUST notify each connected client. The `content` of a message may contain additional space (`0x20`) characters.
   - `WHISPER` `<sender>` `<content>`. When a client receives a private message from another client, the server MUST send a `WHISPER`. As with `MESSAGE`, the `content` may include space characters.
@@ -28,6 +28,7 @@ If a client disconnects from the server without first sending a `LOGOUT`, the se
     - Indicates that the user wishes to receive messages sent to the named room.
     - Users must be in a room in order to send `MESSAGE`s to it.
     - If the user is already in the named room, the server MUST respond with an `OK`, but MUST NOT send `JOIN` notifications to other users in the room.
+    - The server MUST allow a user to be in multiple rooms at once, but a client MAY choose to only allow users to be in a single room.
   - `LEAVE` `<room>`
     - The user wishes to no longer be in the named room.
     - If any `MESSAGE`s are sent to the named room after the server has `OK`ed the `LEAVE` request, the client SHOULD NOT display them to the user.
