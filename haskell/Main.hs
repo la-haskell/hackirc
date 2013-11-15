@@ -59,18 +59,21 @@ main = do
   state <- newIORef defaultState
   sock <- socket AF_INET Stream 0
   setSocketOption sock ReuseAddr 1
-  bindSocket sock (SockAddrInet 1801 iNADDR_ANY)
-  listen sock 1000
+  bindSocket sock (SockAddrInet 4242 iNADDR_ANY)
+  listen sock 2
   forever $ do
-    conn <- accept sock
+    (sock, _) <- accept sock
     forkIO $ userLoop state sock
 
 userLoop :: IORef ServerState -> Socket -> IO ()
 userLoop serverState sock = do
+  putStrLn "Receiving message"
   loginCmd <- recv sock 1024
+  putStrLn "Message received"
   case words loginCmd of
     ["LOGIN", username] -> do
       login serverState username
+      putStrLn "User Logged In"
       go (emptyUserState username)
     _ -> do
       send sock "ERROR Inappropriate command"
