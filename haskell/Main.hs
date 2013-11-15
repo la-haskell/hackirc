@@ -95,26 +95,24 @@ userLoop serverState sock = do
 
 login :: IORef ServerState -> User -> Socket -> IO (Maybe String)
 login serverState user sock = do
-  st <- readIORef serverState
-  case M.lookup user (users st) of
-    Nothing -> do
-      writeIORef serverState $ st { users = M.insert user sock (users st) }
-      return $ Just "OK"
-    _ -> return Nothing
+  atomicModifyIORef' serverState $ \st ->
+    case M.lookup user (users st) of
+      Nothing -> let newState = st { users = M.insert user sock (users st) }
+                 in (newState, Just "OK")
+      _ -> (st, Nothing)
 
 logout :: IORef ServerState -> StateT UserLocalState IO String
 logout serverState = do
     userState <- get
     let username = myUserName userState
-    lift $ modifyIORef serverState $ \st -> st { users = M.delete username (users st) }
-    return "OK"
+    lift $ atomicModifyIORef' serverState $ \st -> (st { users = M.delete username (users st) }, "OK")
 
 
 joinRoom :: IORef ServerState -> Room -> StateT UserLocalState IO String
 joinRoom serverState room = do
   userState <- get
   let username = myUserName userState
-  lift $ modifyIORef serverState $ \st -> st { rooms = M.alter (addUser username) room (rooms st) }
+  lift $ atomicModifyIORef' serverState $ \st -> (st { rooms = M.alter (addUser username) room (rooms st) }, ())
   modify $ \st -> st { myRooms = room : myRooms st }
   return "OK"
     where
@@ -126,7 +124,7 @@ leave :: IORef ServerState -> Room -> StateT UserLocalState IO String
 leave serverState room = do
   userState <- get
   let username = myUserName userState
-  lift $ modifyIORef serverState $ \st -> st { rooms = M.alter (removeUser username) room (rooms st) }
+  lift $ atomicModifyIORef' serverState $ \st -> (st { rooms = M.alter (removeUser username) room (rooms st) }, ())
   modify $ \st -> st { myRooms = delete room $ myRooms st }
   return "OK"
     where
