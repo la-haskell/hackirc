@@ -17,6 +17,7 @@ module Main (
 ) where
 
 import Control.Monad.State
+import Control.Monad.Trans
 import Network.Socket
 import Control.Concurrent
 import Control.Monad
@@ -67,14 +68,19 @@ main = do
 
 userLoop :: IORef ServerState -> Socket -> IO ()
 userLoop serverState sock = do
-  putStrLn "Receiving message"
   loginCmd <- recv sock 1024
-  putStrLn "Message received"
+  putStrLn $ "Message received " ++ loginCmd
   case words loginCmd of
     ["LOGIN", username] -> do
-      login serverState username
-      putStrLn "User Logged In"
-      go (emptyUserState username)
+      resp <- login serverState username sock
+      case resp of
+        Nothing -> do
+          send sock "ERROR Username is taken"
+          sClose sock
+        Just msg -> do
+          putStrLn $ "User " ++ username ++ " logged in"
+          send sock msg
+          go (emptyUserState username)
     _ -> do
       send sock "ERROR Inappropriate command"
       sClose sock
@@ -86,11 +92,22 @@ userLoop serverState sock = do
     send sock resp
     go newUserState
 
-login :: IORef ServerState -> User -> IO String
-login = undefined
+login :: IORef ServerState -> User -> Socket -> IO (Maybe String)
+login serverState user sock = do
+  st <- readIORef serverState
+  case M.lookup user (users st) of
+    Nothing -> do
+      writeIORef serverState $ st { users = M.insert user sock (users st) }
+      return $ Just "OK"
+    _ -> return Nothing
 
 logout :: IORef ServerState -> StateT UserLocalState IO String
-logout = undefined
+logout serverState = do
+    userState <- get
+    let username = myUserName userState
+    lift $ modifyIORef serverState $ \st -> st { users = M.delete username (users st) }
+    return "OK"
+
 
 joinRoom :: IORef ServerState -> Room -> StateT UserLocalState IO String
 joinRoom = undefined
