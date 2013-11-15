@@ -18,6 +18,7 @@ module Main (
 
 import Network.Socket
 import Control.Concurrent
+import Control.Monad
 
 main :: IO ()
 main = do
@@ -33,7 +34,10 @@ mainLoop sock = do
   forkIO (runConn conn)
   mainLoop sock
 
+handle :: [String] -> [String]
+handle = id
+
 runConn :: (Socket, SockAddr) -> IO ()
-runConn (sock, _) = do
-  send sock "Hi!\n"
-  sClose sock
+runConn (sock, _) = forever $ do
+  cmd <- recv sock 1024
+  send sock $ unwords . handle . words $ cmd
