@@ -9,10 +9,10 @@ synopsis: hackirc server
 category: Network
 author: LA Haskell User Group
 data-dir: ""
- 
+
 executable hackirc
     build-depends: containers >=0.5.0.0 && <0.6, base ==4.6.*,
-                   network -any
+                   network -any, mtl -any
     main-is: Main.hs
     buildable: True
- 
+
