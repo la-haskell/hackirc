@@ -11,7 +11,7 @@ author: LA Haskell User Group
 data-dir: ""
 
 executable hackirc
-    build-depends: base ==4.6.*
+    build-depends: base ==4.6.*, network -any
     buildable: True
     other-modules:
     main-is: Main.hs
