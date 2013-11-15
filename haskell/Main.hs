@@ -16,6 +16,7 @@ module Main (
     main
 ) where
 
+import Data.List
 import Control.Monad.State
 import Control.Monad.Trans
 import Network.Socket
@@ -110,10 +111,27 @@ logout serverState = do
 
 
 joinRoom :: IORef ServerState -> Room -> StateT UserLocalState IO String
-joinRoom = undefined
+joinRoom serverState room = do
+  userState <- get
+  let username = myUserName userState
+  lift $ modifyIORef serverState $ \st -> st { rooms = M.alter (addUser username) room (rooms st) }
+  modify $ \st -> st { myRooms = room : myRooms st }
+  return "OK"
+    where
+    addUser username Nothing = Just [username]
+    addUser username (Just users) = Just $ username:users
+
 
 leave :: IORef ServerState -> Room -> StateT UserLocalState IO String
-leave = undefined
+leave serverState room = do
+  userState <- get
+  let username = myUserName userState
+  lift $ modifyIORef serverState $ \st -> st { rooms = M.alter (removeUser username) room (rooms st) }
+  modify $ \st -> st { myRooms = delete room $ myRooms st }
+  return "OK"
+    where
+    removeUser username Nothing = Just []
+    removeUser username (Just users) = Just $ delete username users
 
 say :: IORef ServerState -> Room -> Msg -> StateT UserLocalState IO String
 say = undefined
