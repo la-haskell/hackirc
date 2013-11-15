@@ -12,6 +12,8 @@
 --
 -----------------------------------------------------------------------------
 
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+
 module Main (
     main
 ) where
@@ -20,6 +22,7 @@ import Data.List
 import Control.Applicative
 import Data.Maybe
 import Control.Monad.State
+import Control.Monad.Error
 import Control.Monad.Trans
 import Network.Socket
 import Control.Concurrent
@@ -44,13 +47,19 @@ data UserLocalState = UserLocalState
   , myRooms :: [Room]
   } deriving (Show)
 
+newtype IRC a = IRC { irc :: StateT UserLocalState (ErrorT String IO) a }
+  deriving (Functor, Monad, MonadIO, MonadState UserLocalState, MonadError String)
+
+runIRC :: UserLocalState -> IRC a -> IO (Either String (a, UserLocalState))
+runIRC st = runErrorT . flip runStateT st . irc
+
 defaultState :: ServerState
 defaultState = ServerState M.empty M.empty
 
 emptyUserState :: User -> UserLocalState
 emptyUserState = flip UserLocalState []
 
-handle :: IORef ServerState -> [String] -> StateT UserLocalState IO String
+handle :: IORef ServerState -> [String] -> IRC String
 handle state ["LOGOUT"] = logout state
 handle state ["JOIN", room] = joinRoom state room
 handle state ["LEAVE", room] = leave state room
@@ -63,8 +72,8 @@ main = do
   state <- newIORef defaultState
   sock <- socket AF_INET Stream 0
   setSocketOption sock ReuseAddr 1
-  bindSocket sock (SockAddrInet 4242 iNADDR_ANY)
-  listen sock 2
+  bindSocket sock (SockAddrInet 1801 iNADDR_ANY)
+  listen sock 1000
   forever $ do
     (sock, _) <- accept sock
     forkIO $ userLoop state sock
@@ -91,9 +100,14 @@ userLoop serverState sock = do
   go :: UserLocalState -> IO ()
   go userState = do
     cmd <- recv sock 1024
-    (resp, newUserState) <- flip runStateT userState $ handle serverState $ words cmd
-    send sock resp
-    go newUserState
+    response <- runIRC userState $ handle serverState $ words cmd
+    case response of
+      Left err -> do
+        send sock $ unwords ["ERROR", err]
+        return ()
+      Right (resp, newUserState) -> do
+        send sock resp
+        go newUserState
 
 login :: IORef ServerState -> User -> Socket -> IO (Maybe String)
 login serverState user sock = do
@@ -103,18 +117,17 @@ login serverState user sock = do
                  in (newState, Just "OK")
       _ -> (st, Nothing)
 
-logout :: IORef ServerState -> StateT UserLocalState IO String
+logout :: IORef ServerState -> IRC String
 logout serverState = do
     userState <- get
     let username = myUserName userState
-    lift $ atomicModifyIORef' serverState $ \st -> (st { users = M.delete username (users st) }, "OK")
+    liftIO $ atomicModifyIORef' serverState $ \st -> (st { users = M.delete username (users st) }, "OK")
 
-
-joinRoom :: IORef ServerState -> Room -> StateT UserLocalState IO String
+joinRoom :: IORef ServerState -> Room -> IRC String
 joinRoom serverState room = do
   userState <- get
   let username = myUserName userState
-  lift $ atomicModifyIORef' serverState $ \st -> (st { rooms = M.alter (addUser username) room (rooms st) }, ())
+  liftIO $ atomicModifyIORef' serverState $ \st -> (st { rooms = M.alter (addUser username) room (rooms st) }, ())
   modify $ \st -> st { myRooms = room : myRooms st }
   broadcast serverState room $ unwords ["JOIN", room, username]
   return "OK"
@@ -122,12 +135,12 @@ joinRoom serverState room = do
     addUser username Nothing = Just [username]
     addUser username (Just users) = Just $ username:users
 
-
-leave :: IORef ServerState -> Room -> StateT UserLocalState IO String
+leave :: IORef ServerState -> Room -> IRC String
 leave serverState room = do
   userState <- get
+  when (not (room `elem` myRooms userState)) $ throwError $ "Not in room " ++ room
   let username = myUserName userState
-  lift $ atomicModifyIORef' serverState $ \st -> (st { rooms = M.alter (removeUser username) room (rooms st) }, ())
+  liftIO $ atomicModifyIORef' serverState $ \st -> (st { rooms = M.alter (removeUser username) room (rooms st) }, ())
   modify $ \st -> st { myRooms = delete room $ myRooms st }
   broadcast serverState room $ unwords ["LEAVE", room, username]
   return "OK"
@@ -135,29 +148,30 @@ leave serverState room = do
     removeUser username Nothing = Just []
     removeUser username (Just users) = Just $ delete username users
 
-say :: IORef ServerState -> Room -> Msg -> StateT UserLocalState IO String
+say :: IORef ServerState -> Room -> Msg -> IRC String
 say serverState room message = do
   userState <- get
+  when (not (room `elem` myRooms userState)) $ throwError $ "Not in room " ++ room
   let username = myUserName userState
   broadcast serverState room $ unwords ["MESSAGE", username, room, message]
   return "OK"
 
-whisper :: IORef ServerState -> User -> Msg -> StateT UserLocalState IO String
+whisper :: IORef ServerState -> User -> Msg -> IRC String
 whisper serverState user message = do
   userState <- get
   let username = myUserName userState
-  st <- lift $ readIORef serverState
-  lift $ case M.lookup user $ users st of
-    Nothing -> return $ "ERROR User " ++ user ++ " not found."
+  st <- liftIO $ readIORef serverState
+  case M.lookup user $ users st of
+    Nothing -> throwError $ "User " ++ user ++ " not logged in."
     Just sock -> do
-      send sock $ unwords ["WHISPER", username, message]
+      liftIO $ send sock $ unwords ["WHISPER", username, message]
       return "OK"
 
-broadcast :: IORef ServerState -> Room -> Msg -> StateT UserLocalState IO ()
+broadcast :: IORef ServerState -> Room -> Msg -> IRC ()
 broadcast serverState room message = do
-  st <- lift $ readIORef serverState
+  st <- liftIO $ readIORef serverState
   let usersInRoom = fromMaybe [] $ M.lookup room (rooms st)
-  lift $ forM_ usersInRoom $ \user -> do
+  liftIO $ forM_ usersInRoom $ \user -> do
     case M.lookup user $ users st of
       Nothing -> putStrLn $ "User " ++ user ++ " not found."
       Just sock -> do
