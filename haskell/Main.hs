@@ -17,6 +17,8 @@ module Main (
 ) where
 
 import Data.List
+import Control.Applicative
+import Data.Maybe
 import Control.Monad.State
 import Control.Monad.Trans
 import Network.Socket
@@ -114,6 +116,7 @@ joinRoom serverState room = do
   let username = myUserName userState
   lift $ atomicModifyIORef' serverState $ \st -> (st { rooms = M.alter (addUser username) room (rooms st) }, ())
   modify $ \st -> st { myRooms = room : myRooms st }
+  broadcast serverState room $ unwords ["JOIN", room, username]
   return "OK"
     where
     addUser username Nothing = Just [username]
@@ -126,13 +129,42 @@ leave serverState room = do
   let username = myUserName userState
   lift $ atomicModifyIORef' serverState $ \st -> (st { rooms = M.alter (removeUser username) room (rooms st) }, ())
   modify $ \st -> st { myRooms = delete room $ myRooms st }
+  broadcast serverState room $ unwords ["LEAVE", room, username]
   return "OK"
     where
     removeUser username Nothing = Just []
     removeUser username (Just users) = Just $ delete username users
 
 say :: IORef ServerState -> Room -> Msg -> StateT UserLocalState IO String
-say = undefined
+say serverState room message = do
+  userState <- get
+  let username = myUserName userState
+  broadcast serverState room $ unwords ["MESSAGE", username, room, message]
+  return "OK"
 
-whisper :: IORef ServerState -> Room -> Msg -> StateT UserLocalState IO String
-whisper = undefined
+whisper :: IORef ServerState -> User -> Msg -> StateT UserLocalState IO String
+whisper serverState user message = do
+  userState <- get
+  let username = myUserName userState
+  st <- lift $ readIORef serverState
+  lift $ case M.lookup user $ users st of
+    Nothing -> return $ "ERROR User " ++ user ++ " not found."
+    Just sock -> do
+      send sock $ unwords ["WHISPER", username, message]
+      return "OK"
+
+broadcast :: IORef ServerState -> Room -> Msg -> StateT UserLocalState IO ()
+broadcast serverState room message = do
+  st <- lift $ readIORef serverState
+  let usersInRoom = fromMaybe [] $ M.lookup room (rooms st)
+  lift $ forM_ usersInRoom $ \user -> do
+    case M.lookup user $ users st of
+      Nothing -> putStrLn $ "User " ++ user ++ " not found."
+      Just sock -> do
+        send sock message
+        return ()
+
+
+
+
+
